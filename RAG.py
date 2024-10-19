@@ -94,9 +94,9 @@ def find_citetion_of_query(query):
     with open(filename, 'w') as file:
         file.write(sequences['generated_text'] + '\n')
 
-PROMPT_TEMPLATE = "You are given an excerpt from a paper, where a citation was deleted. I'm trying to find the citation (ignore the word [CITATION], that's just where the citation was deleted from. You will be asked to help me find the paper from which the citation was deleted.\n" \
-    "You can ask me a search query and I will try to find related papers. I can't give you more data from the paper, or any data about the cited paper. You have to do it exactly once. After that, you will be asked to provide the citation. If you don't know the citation, you can say 'I don't know'.\n" \
-    "Excerpt: {excerpt}\n"
+PROMPT_TEMPLATE = "**You are given an excerpt from a paper, where a citation was deleted. I'm trying to find the citation (ignore the word [CITATION], that's just where the citation was deleted from. You will be asked to help me find the paper from which the citation was deleted.\n" \
+    "You can ask me a search query and I will try to find related papers. I can't give you more data from the paper, or any data about the cited paper. You have to do it exactly once. After that, you will be asked to provide the citation. If you don't know the citation, you can say 'I don't know'.**\n" \
+    "EXCERPT START\n{excerpt}\nEXCERPT END\n\n**Now just supply the query in this format: Query: text**"
 
 class CitationFinder:
     def __init__(self):
@@ -131,14 +131,15 @@ class CitationFinder:
         messages = [PROMPT_TEMPLATE.format(excerpt=excerpt)]
         search_query = self.ask_model(*messages)
         messages.append(search_query)
+        search_query = search_query.removeprefix("Query: ")
         print(search_query)
         related_papers = self.retriever.retrieve_relevant_papers(search_query)
         print(related_papers)
         titles = [paper['metadata']['title'] for paper in related_papers['matches']]
-        select_paper_message = '\n'.join([f"{i}. {title}" for (i, title) in enumerate(titles)])
+        select_paper_message = '\n'.join([f"{i+1}. {title}" for (i, title) in enumerate(titles)])
         if not related_papers['matches']:
             select_paper_message = 'No papers found'
-        messages.append(select_paper_message + '\nNow guess the cited paper title?')
+        messages.append(select_paper_message + '\nNow just reply with your guessed cited paper title')
         print(select_paper_message)
         citation = self.ask_model(*messages)
         print(citation)
