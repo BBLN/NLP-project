@@ -22,7 +22,7 @@ class EmbeddingWrapper:
 class Specter2AdhocQuery(EmbeddingWrapper):
     def __init__(self):
         tokenizer = AutoTokenizer.from_pretrained('allenai/specter2_base')
-        model = AutoAdapterModel.from_pretrained('allenai/specter2_base', device_map="auto")
+        model = AutoAdapterModel.from_pretrained('allenai/specter2_base')
         model.load_adapter("allenai/specter2_adhoc_query", source="hf", load_as="specter2_adhoc_query", set_active=True)
 
         super().__init__(model, tokenizer)
@@ -36,7 +36,7 @@ class Specter2AdhocQuery(EmbeddingWrapper):
 class Specter2Document(EmbeddingWrapper):
     def __init__(self):
         tokenizer = AutoTokenizer.from_pretrained('allenai/specter2_base')
-        model = AutoAdapterModel.from_pretrained('allenai/specter2_base', device_map="auto")
+        model = AutoAdapterModel.from_pretrained('allenai/specter2_base')
         model.load_adapter("allenai/specter2", source="hf", load_as="specter2_proximity", set_active=True)
         super().__init__(model, tokenizer)
     
