@@ -109,7 +109,7 @@ def index_fn(embedding_model, b):
 
 def build_semanticscholar_index(embedding_model):
     try:
-        dataset = datasets.load_from_disk("semanticscholar_embeddings_dataset")
+        dataset = datasets.load_from_disk("semanticscholar_highly_cited")
     except FileNotFoundError:
         dataset = build_semanticscholar_offline_dataset()
         #dataset.with_format("torch")

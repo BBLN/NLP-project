@@ -8,7 +8,7 @@ from specter_embedding import Specter2AdhocQuery
 class RAGRetriever:
     def __init__(self):
         self.pc = get_pinecone_client()
-        self.index_name = "semanticscholar-index-specter2-10-19-2024"
+        self.index_name = "semanticscholar-index-specter2-10-28-2024"
         self.embedding_model = Specter2AdhocQuery()
         self.index = get_or_create_index(self.pc, self.index_name, self.embedding_model.embedding_dim())
 
@@ -100,8 +100,8 @@ PROMPT_TEMPLATE = "**You are given an excerpt from a paper, where a citation was
 
 class CitationFinder:
     def __init__(self):
-        model_name = "microsoft/Phi-3-mini-128k-instruct"
-        self.model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-128k-instruct", trust_remote_code=True, torch_dtype="auto", device_map="auto")
+        model_name = "microsoft/Phi-3.5-mini-instruct"
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True, torch_dtype="auto", device_map="auto")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.pipeline = transformers.pipeline(
             "text-generation",
