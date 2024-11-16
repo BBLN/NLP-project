@@ -39,9 +39,9 @@ def build_arxiv_index():
     )
     print(f"Index {index_name} has been updated with {len(metadatas)} papers.")
 
-def build_semanticscholar_offline_dataset(limit=100):
+def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=30):
     try:
-        ds = datasets.load_from_disk("semanticscholar_dataset")
+        ds = datasets.load_from_disk(f"semanticscholar_dataset_mincitation{min_citation_count}")
         return ds
     except FileNotFoundError:
         pass
@@ -50,22 +50,21 @@ def build_semanticscholar_offline_dataset(limit=100):
     def gen(shards):
         i = 0
         for year in shards:
-            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year)):
+            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year), min_citation_count=min_citation_count):
                 if i > limit:
                     break
                 i += 1
                 yield dict(x)
-                datasets.IterableDataset
     ds = datasets.Dataset.from_generator(gen, gen_kwargs={
-        "shards": list(range(2018, 2019)),
+        "shards": list(range(2018, 2025)),
     }, num_proc=4)
-    ds.save_to_disk("semanticscholar_dataset")
+    ds.save_to_disk(f"semanticscholar_dataset_mincitation{min_citation_count}")
     return ds
 
 
 def get_semanticscholar_record(embedding_model_name):
     def map_record(row):
-        filtered_metadata_columns = ["paperId", "title", "year", "citationCount"]
+        filtered_metadata_columns = ["paperId", "title", "year", "citationCount", 'abstract']
         metadata = {k: v for k, v in row.items() if k in filtered_metadata_columns}
         return {
             "id": f"{row['paperId']}#semanticscholar-metadata#{embedding_model_name}",
@@ -109,7 +108,7 @@ def index_fn(embedding_model, b):
 
 def build_semanticscholar_index(embedding_model):
     try:
-        dataset = datasets.load_from_disk("semanticscholar_highly_cited")
+        dataset = datasets.load_from_disk("semanticscholar_dataset_mincitation30")
     except FileNotFoundError:
         dataset = build_semanticscholar_offline_dataset()
         #dataset.with_format("torch")
