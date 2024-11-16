@@ -50,7 +50,7 @@ def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=30):
     def gen(shards):
         i = 0
         for year in shards:
-            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year), min_citation_count=min_citation_count):
+            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year), min_citation_count=min_citation_count, limit=limit):
                 if i > limit:
                     break
                 i += 1
@@ -108,7 +108,7 @@ def index_fn(embedding_model, b):
 
 def build_semanticscholar_index(embedding_model):
     try:
-        dataset = datasets.load_from_disk("semanticscholar_dataset_mincitation30")
+        dataset = datasets.load_from_disk("semanticscholar_dataset_embeddings_mincitation30")
     except FileNotFoundError:
         dataset = build_semanticscholar_offline_dataset()
         #dataset.with_format("torch")
@@ -117,7 +117,7 @@ def build_semanticscholar_index(embedding_model):
         def embed_fn(b):
             return embed_batch(embedding_model, b)
         dataset = dataset.map(embed_fn, batched=True, batch_size=500, num_proc=4)
-        dataset.save_to_disk("semanticscholar_embeddings_dataset")
+        dataset.save_to_disk("semanticscholar_dataset_embeddings_mincitation30")
 
  
     #dataset.map(index_fn, batched=True, batch_size=500)
