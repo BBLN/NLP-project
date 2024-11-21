@@ -39,7 +39,7 @@ def build_arxiv_index():
     )
     print(f"Index {index_name} has been updated with {len(metadatas)} papers.")
 
-def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=30):
+def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=20):
     try:
         ds = datasets.load_from_disk(f"semanticscholar_dataset_mincitation{min_citation_count}")
         return ds
@@ -50,7 +50,7 @@ def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=30):
     def gen(shards):
         i = 0
         for year in shards:
-            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year), min_citation_count=min_citation_count):
+            for x in sch.bulk_search(query="", fields_of_study=["Computer Science"], year=str(year), min_citation_count=min_citation_count, limit=1000):
                 if i > limit:
                     break
                 i += 1
@@ -65,7 +65,7 @@ def build_semanticscholar_offline_dataset(limit=1000000, min_citation_count=30):
 def get_semanticscholar_record(embedding_model_name):
     def map_record(row):
         filtered_metadata_columns = ["paperId", "title", "year", "citationCount", 'abstract']
-        metadata = {k: v for k, v in row.items() if k in filtered_metadata_columns}
+        metadata = {k: v for k, v in row.items() if k in filtered_metadata_columns and v is not None}
         return {
             "id": f"{row['paperId']}#semanticscholar-metadata#{embedding_model_name}",
             "values": row['embeddings'],
@@ -98,17 +98,20 @@ def worker_init(index_name, dim):
  
 def index_fn(embedding_model, b):
     global index
-    ds = datasets.Dataset.from_dict(b)
-    vectors = map(get_semanticscholar_record(embedding_model), ds)
-    # skip missing embeddings
-    filtered_vectors = filter(lambda x: x['values'] is not None, vectors)
-    index.upsert(
-        vectors=filtered_vectors,
-        namespace="semanticscholar-metadata")
+    try:
+       ds = datasets.Dataset.from_dict(b)
+       vectors = map(get_semanticscholar_record(embedding_model), ds)
+       # skip missing embeddings
+       filtered_vectors = filter(lambda x: x['values'] is not None, vectors)
+       index.upsert(
+          vectors=filtered_vectors,
+          namespace="semanticscholar-metadata")
+    except Exception as e:
+        print("Exception", e)
 
 def build_semanticscholar_index(embedding_model):
     try:
-        dataset = datasets.load_from_disk("semanticscholar_dataset_mincitation30")
+        dataset = datasets.load_from_disk("semanticscholar_dataset_embeddings_mincitation20")
     except FileNotFoundError:
         dataset = build_semanticscholar_offline_dataset()
         #dataset.with_format("torch")
@@ -117,7 +120,7 @@ def build_semanticscholar_index(embedding_model):
         def embed_fn(b):
             return embed_batch(embedding_model, b)
         dataset = dataset.map(embed_fn, batched=True, batch_size=500, num_proc=4)
-        dataset.save_to_disk("semanticscholar_embeddings_dataset")
+        dataset.save_to_disk("semanticscholar_dataset_embeddings_mincitation20")
 
  
     #dataset.map(index_fn, batched=True, batch_size=500)
