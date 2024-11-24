@@ -86,18 +86,27 @@ def load_model():
         modules_to_save=None,
         #target_modules= ['k_proj', 'q_proj', 'v_proj', 'o_proj', "gate_proj", "down_proj", "up_proj"]
     )
-    model = AutoModelForCausalLM.from_pretrained(
-        "microsoft/Phi-3.5-mini-instruct",
-        device_map="auto",
-        quantization_config=BitsAndBytesConfig(
+    quantization_config=BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype="float16",
             bnb_4bit_use_double_quant=True,
-        ))
-    model = prepare_model_for_kbit_training(model)
-    model = PeftModel.from_pretrained(model, 'sft-3-epochs-86', is_trainable=True)
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(model)
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        "microsoft/Phi-3.5-mini-instruct",
+        #"unsloth/phi-3.5-mini-instruct-bnb-4bit",
+        device_map="auto",
+        quantization_config=quantization_config,
+        #quantization_config=BitsAndBytesConfig(
+        #    load_in_4bit=True,
+        #    bnb_4bit_quant_type="nf4",
+        #    bnb_4bit_compute_dtype="float16",
+        #    bnb_4bit_use_double_quant=True,
+        )
+    #model = prepare_model_for_kbit_training(model)
+    model = PeftModel.from_pretrained(model, 'sft-3-epochs-86') #'ppo-20241115')
+    model = model.merge_and_unload()
+    model = AutoModelForCausalLMWithValueHead.from_pretrained(model, peft_config=lora_config)
     return model, tokenizer
 
 # --- PPO Configuration ---
@@ -130,7 +139,7 @@ def format_instructions():
 
 import csv
 gold_f = open(f'gold_selections_{current_time}.csv', 'w')
-gold_csv = csv.DictWriter(gold_f, fieldnames=['paperId', 'title', 'excerpt', 'reason'])
+gold_csv = csv.DictWriter(gold_f, fieldnames=['paperId', 'title', 'excerpt', 'reason', 'action', 'ref_action', 'ref_status'])
 gold_csv.writeheader()
 
 
@@ -138,11 +147,11 @@ def train_batch(ppo_trainer, tokenizer, selections):
     # --- Training Loop ---
     generation_kwargs = {
         "min_length": -1,
-        "max_new_tokens": 128,
+        "max_new_tokens": 164,
         #"num_beams": 2,
         "do_sample": True,
-        "top_k": 2,
-        #"top_p": 0.7,
+        #"top_k": 2,
+        "top_p": 0.7,
         'pad_token_id': tokenizer.eos_token_id,
     }
 
@@ -155,7 +164,19 @@ def train_batch(ppo_trainer, tokenizer, selections):
     excerpts = []
     for item in batch['query']:
         excerpt = item['excerpt']
-        papers = item['results'][:10]
+        k_papers = random.randint(2, 5)
+        results = item['results']
+        # Keep the cited paper ID and k_papers - 1 random papers
+        # find cited paper in results
+        target_paper = list(filter(lambda x: x['paperId'] == item['paperId'], results))
+        if not target_paper:
+            print(f"Paper {item['paperId']} not found in results??")
+            continue
+        other_papers = list(filter(lambda x: x['paperId'] != item['paperId'], results))
+        random.shuffle(other_papers)
+        papers = [target_paper[0]] + other_papers[:k_papers - 1] 
+        # shuffle
+        random.shuffle(papers)
         papers_str = ""
         for paper in papers:
             papers_str += f"- Paper ID: {paper['paperId']}\n"
@@ -165,7 +186,7 @@ def train_batch(ppo_trainer, tokenizer, selections):
             papers_str += f"\tCitation Count: {paper['citationCount']}\n\n"
 
         messages = [
-            {"role": "user", "content": f"I'm looking for a paper referenced in this excerpt:\n\n{excerpt}\n\nOut of the following paper list, you must select single paper ID as instructed\n\n{papers_str}\n\nUse JSON format as follows:\n{format_instructions()}" },
+            {"role": "user", "content": f"From the following academic papers list, you must select single paper.\n\n{papers_str}\n\nI'm looking for the paper referenced in the following excerpt:\n\n{excerpt}\nThere's exactly one correct paper. Respond with JSON format as follows exactly:\n{format_instructions()}. The reason should be single line consice short explanation of why that paper is the best match, respond with nothing but a JSON format." },
         ]
         excerpts.append(excerpt)
         inputs.append(messages)
@@ -181,24 +202,37 @@ def train_batch(ppo_trainer, tokenizer, selections):
     responses = tokenizer.batch_decode(response_tensors, skip_special_tokens=True)
     ref_responses = tokenizer.batch_decode(response_ref_tensors, skip_special_tokens=True)
 
-    def try_reward(action, ref_action, p, e):
-        print(f"\naction: {action}\nref action: {ref_action}\npaper: {p['title']}\nexcerpt: {e}")
+    def try_reward(actionStr, ref_actionStr, p, e):
+        print(f"\naction: {actionStr}\nref action: {ref_actionStr}\npaper: {p['title']}\nexcerpt: {e}")
         try:
-            action = json.loads(action)
+            action = json.loads(actionStr)
             selectedPaper = action['action']['paper_id']
-            action = action['action']['name']
+            action_name = action['action']['name']
             reason = action['reason']
         except:
+            print("Invalid JSON")
+            return -2
+        if action_name != "select_paper":
             print("Invalid action")
-            return -5
-        if action != "select_paper":
-            print("Invalid action")
-            return -5
+            return -2
         if selectedPaper != p['paperId']:
             print("Incorrect paper selected")
             return -1
-        gold_csv.writerow({'paperId': p['paperId'], 'title': p['title'], 'excerpt': e, 'reason': reason})
-        return 1
+        print("Correct paper selected")
+        ref_status = 'incorrect'
+        try:
+            ref_action = json.loads(ref_actionStr)
+            refSelectedPaper = ref_action['action']['paper_id']
+            if refSelectedPaper != p['paperId']:
+                print("Ref: Incorrect paper selected")
+            else:
+                print("Ref: Correct paper selected")
+                ref_status = 'correct'
+        except:
+            ref_status = 'invalid'
+        gold_csv.writerow({'paperId': p['paperId'], 'title': p['title'], 'excerpt': e, 'reason': reason,
+                           'action': actionStr, 'ref_action': ref_actionStr, 'ref_status': ref_status})
+        return 2
          
     # log wandb time duration to compute rewards
     start_time = datetime.now()
@@ -221,9 +255,12 @@ def train_batch(ppo_trainer, tokenizer, selections):
 def train_ppo():
     dataset = load_from_disk("queries_dataset_ranked_20241115_231741")
     dataset = dataset.filter(lambda x: x["relevance_rank"] <= 10 or x["citation_rank"] <= 10)
+    dataset = dataset.filter(lambda x: any(p['paperId'] == x['paperId'] for p in x['results']))
+    print("Selection dataset:", len(dataset))
 
     model, tokenizer = load_model()
     trainer = init_trainer(model, tokenizer)
+    trainer.save_pretrained(f"{LORA_OUTPUT_DIR}-base")
 
     training_data = list(dataset)
     for epoch in tqdm(range(args.epochs), "epoch: "):         
